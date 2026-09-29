@@ -5,54 +5,61 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 import yt_dlp
 
-ADMIN_ID = 1126219851  # Replace with your numeric Telegram User ID
+# 1. PASTE YOUR COPIED NUMERIC TELEGRAM ID HERE (e.g., 584920394)
+ADMIN_ID = 1126219851  
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# Helper function to extract a clean filename slug
+# Helper function to clean file names safely
 def get_safe_filename(title):
     return re.sub(r'[\\/*?:"<>|]', "", title)[:50]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "⚡ **2GB High-Capacity Downloader Bot**\n\n"
-        "• Send a link directly to download it as a **Video**\n"
-        "• Type `/mp3 <link>` to download it as a **High-Quality Audio Track**"
+        "👋 **Welcome to your YouTube Downloader Bot!**\n\n"
+        "• Send me any YouTube link directly to download it as a **Video** (Capped at 720p/45MB).\n"
+        "• Use the command `/mp3 <link>` to download it as a high-quality **Audio Track**."
     )
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id == ADMIN_ID:
+        await update.message.reply_text("✨ YouTube Saver Bot Status: Online and running perfectly, Boss!")
+    else:
+        await update.message.reply_text("❌ Unauthorized. Admin access only.")
 
 async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE, is_audio=False, url=""):
     if not url:
         url = update.message.text
 
     if "youtube.com" not in url and "youtu.be" not in url:
-        await update.message.reply_text("❌ Please provide a valid YouTube link.")
+        await update.message.reply_text("❌ Please send a valid YouTube link.")
         return
 
-    status_message = await update.message.reply_text("⏳ Fetching metadata and downloading source from YouTube...")
-
-    # Unique identifier base
+    status_message = await update.message.reply_text("⏳ Processing your request... Please wait.")
     file_id = str(update.message.message_id)
     
+    # Standard Cloud Optimized Rules (Keeps files safely under Telegram's 50MB limit)
     if is_audio:
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f'audio_{file_id}.%(ext)s',
-            'max_filesize': 1950 * 1024 * 1024, # 1.95 GB Cap
+            'max_filesize': 45 * 1024 * 1024,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '320',
+                'preferredquality': '192',
             }],
         }
         expected_ext = "mp3"
     else:
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
             'outtmpl': f'video_{file_id}.%(ext)s',
-            'max_filesize': 1950 * 1024 * 1024, # 1.95 GB Cap
+            'max_filesize': 45 * 1024 * 1024,
             'merge_output_format': 'mp4',
         }
         expected_ext = "mp4"
@@ -67,53 +74,46 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
         
         if os.path.exists(filename):
             os.rename(filename, final_output)
-            
-            await status_message.edit_text("📤 Uploading heavy payload to Telegram server (Up to 2GB supported)...")
+            await status_message.edit_text("📤 Uploading file to Telegram...")
             
             with open(final_output, 'rb') as local_file:
                 if is_audio:
-                    await update.message.reply_audio(audio=local_file, title=title, caption="Audio extracted via Mobile Bot!")
+                    await update.message.reply_audio(audio=local_file, title=title, caption="Audio extracted successfully!")
                 else:
                     await update.message.reply_video(video=local_file, caption=f"🎥 {title}")
             
             os.remove(final_output)
             await status_message.delete()
         else:
-            await status_message.edit_text("❌ Processing completed but local download asset was not located.")
+            await status_message.edit_text("❌ System error: Downloaded asset could not be located.")
 
     except Exception as e:
         logging.error(e)
-        await status_message.edit_text(f"❌ Operation terminated. Ensure file is within bounds or not restricted.")
-        # Cleanup routine
-        for f in os.listdir('.'):
-            if file_id in f:
-                try: os.remove(f)
+        await status_message.edit_text("❌ Failed to process. The video might be too long, private, or over the 50MB limit.")
+        for item in os.listdir('.'):
+            if file_id in item:
+                try: os.remove(item)
                 except: pass
 
 async def mp3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ Missing arguments. Usage: `/mp3 https://youtube.com/...`")
+        await update.message.reply_text("❌ Usage: `/mp3 <paste your youtube link here>`")
         return
-    await download_media(update, context, is_audio=True, url=context.args[0])
+    url_arg = context.args[0]
+    await download_media(update, context, is_audio=True, url=url_arg)
 
 async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await download_media(update, context, is_audio=False)
 
 if __name__ == '__main__':
-    
+    # 2. BOTFATHER TOKEN GOES DIRECTLY HERE
     BOT_TOKEN = "8836848217:AAE_Ht4bzJ2ymkg0E6ChsZvnI__fMOjfNOI"
 
-    # Direct connection straight to Telegram's cloud servers
+    # Direct standard connection (Zero docker layers needed)
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler('start', start))
-    application.add_handler(CommandHandler('mp3', mp3_command))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), video_handler))
-    
-    application.run_polling()
-
-
-    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('admin', admin_panel))
     application.add_handler(CommandHandler('mp3', mp3_command))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), video_handler))
     
