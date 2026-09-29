@@ -42,12 +42,13 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
     status_message = await update.message.reply_text("⏳ Processing your request... Please wait.")
     file_id = str(update.message.message_id)
     
-    # Standard Cloud Optimized Rules (Keeps files safely under Telegram's 50MB limit)
+        # Bypassing YouTube's automated block rules
     if is_audio:
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f'audio_{file_id}.%(ext)s',
             'max_filesize': 45 * 1024 * 1024,
+            'extractor_args': {'youtube': {'player_client': 'web_safari,web_embedded,-tv_downgraded'}},
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -55,14 +56,17 @@ async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
             }],
         }
         expected_ext = "mp3"
+        
     else:
         ydl_opts = {
             'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
             'outtmpl': f'video_{file_id}.%(ext)s',
             'max_filesize': 45 * 1024 * 1024,
+            'extractor_args': {'youtube': {'player_client': 'web_safari,web_embedded,-tv_downgraded'}},
             'merge_output_format': 'mp4',
         }
         expected_ext = "mp4"
+
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
