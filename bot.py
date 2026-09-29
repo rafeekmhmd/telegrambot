@@ -100,11 +100,18 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await download_media(update, context, is_audio=False)
 
 if __name__ == '__main__':
-    # REPLACE BOTH VALS BELOW TO CONNECT TO LOCAL APIS
+    
     BOT_TOKEN = "8836848217:AAE_Ht4bzJ2ymkg0E6ChsZvnI__fMOjfNOI"
-    LOCAL_SERVER_URL = "http://localhost:8081/bot" # Your local instance point
 
-    application = ApplicationBuilder().token(BOT_TOKEN).base_url(LOCAL_SERVER_URL).build()
+    # Direct connection straight to Telegram's cloud servers
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('mp3', mp3_command))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), video_handler))
+    
+    application.run_polling()
+
 
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('mp3', mp3_command))
