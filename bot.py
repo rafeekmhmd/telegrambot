@@ -1,124 +1,151 @@
 import logging
 import os
 import re
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 import yt_dlp
 
-# 1. PASTE YOUR COPIED NUMERIC TELEGRAM ID HERE (e.g., 584920394)
-ADMIN_ID = 1126219851  
+ADMIN_ID = 1126219851  # 1. CHANGE THIS TO YOUR NUMERIC USER ID
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# Helper function to clean file names safely
 def get_safe_filename(title):
     return re.sub(r'[\\/*?:"<>|]', "", title)[:50]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 **Welcome to your YouTube Downloader Bot!**\n\n"
-        "• Send me any YouTube link directly to download it as a **Video** (Capped at 720p/45MB).\n"
-        "• Use the command `/mp3 <link>` to download it as a high-quality **Audio Track**."
+        "⚡ **Welcome to the Ultimate Media Downloader!**\n\n"
+        "Send me a valid YouTube link directly, and I will generate an interactive menu on your screen."
     )
 
+# Admin command panel check
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id == ADMIN_ID:
-        await update.message.reply_text("✨ YouTube Saver Bot Status: Online and running perfectly, Boss!")
+    if update.effective_user.id == ADMIN_ID:
+        await update.message.reply_text("✨ Downloader Status: Online and fully updated, Boss!")
     else:
-        await update.message.reply_text("❌ Unauthorized. Admin access only.")
+        await update.message.reply_text("❌ Unauthorized access.")
 
-async def download_media(update: Update, context: ContextTypes.DEFAULT_TYPE, is_audio=False, url=""):
-    if not url:
-        url = update.message.text
-
+# Step 1: Detect link and present Main Interactive Screen
+async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text
     if "youtube.com" not in url and "youtu.be" not in url:
-        await update.message.reply_text("❌ Please send a valid YouTube link.")
+        await update.message.reply_text("❌ Please enter a valid YouTube link.")
         return
 
-    status_message = await update.message.reply_text("⏳ Processing your request... Please wait.")
-    file_id = str(update.message.message_id)
+    # Create Selection Buttons on Screen
+    keyboard = [
+        [
+            InlineKeyboardButton("🎥 Video Screen", callback_data=f"menu_video|{url}"),
+            InlineKeyboardButton("🎵 MP3 Audio Screen", callback_data=f"menu_audio|{url}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🎯 **Format Choice:** Select your output medium below:", reply_markup=reply_markup)
+
+# Step 2: Handle quality choice submenu
+async def handle_menu_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-        # Bypassing YouTube's automated block rules
-    if is_audio:
+    data, url = query.data.split("|")
+    
+    if data == "menu_video":
+        keyboard = [
+            [InlineKeyboardButton("HD High Quality (720p)", callback_data=f"dl_video_720|{url}")],
+            [InlineKeyboardButton("Standard Quality (480p)", callback_data=f"dl_video_480|{url}")]
+        ]
+        text = "🎬 Select your preferred **Video Resolution**:"
+    else:
+        keyboard = [
+            [InlineKeyboardButton("High Definition (320kbps MP3)", callback_data=f"dl_audio_320|{url}")],
+            [InlineKeyboardButton("Standard Audio (192kbps MP3)", callback_data=f"dl_audio_192|{url}")]
+        ]
+        text = "🎧 Select your preferred **Audio Quality**:"
+        
+    await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# Step 3: Download and deliver the chosen payload
+async def process_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    action, url = query.data.split("|")
+    await query.edit_message_text("⏳ Connecting to secure bypass nodes... Please wait.")
+    
+    file_id = str(query.message.message_id)
+    
+    # Advanced mobile client spoofs to eliminate "Sign in to confirm you are not a bot" errors
+    base_bypass_args = {'youtube': {'player_client': ['ios', 'android', 'mweb']}}
+
+    if "dl_audio" in action:
+        quality = "320" if "320" in action else "192"
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'ba/b',
             'outtmpl': f'audio_{file_id}.%(ext)s',
             'max_filesize': 45 * 1024 * 1024,
-            'extractor_args': {'youtube': {'player_client': 'web_safari,web_embedded,-tv_downgraded'}},
+            'extractor_args': base_bypass_args,
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
-                'preferredquality': '192',
+                'preferredquality': quality,
             }],
         }
         expected_ext = "mp3"
-        
     else:
+        height = "720" if "720" in action else "480"
         ydl_opts = {
-            'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+            'format': f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best',
             'outtmpl': f'video_{file_id}.%(ext)s',
             'max_filesize': 45 * 1024 * 1024,
-            'extractor_args': {'youtube': {'player_client': 'web_safari,web_embedded,-tv_downgraded'}},
+            'extractor_args': base_bypass_args,
             'merge_output_format': 'mp4',
         }
         expected_ext = "mp4"
-
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = get_safe_filename(info.get('title', 'media_file'))
             
-        filename = f"audio_{file_id}.{expected_ext}" if is_audio else f"video_{file_id}.{expected_ext}"
+        filename = f"audio_{file_id}.{expected_ext}" if "dl_audio" in action else f"video_{file_id}.{expected_ext}"
         final_output = f"{title}.{expected_ext}"
         
         if os.path.exists(filename):
             os.rename(filename, final_output)
-            await status_message.edit_text("📤 Uploading file to Telegram...")
+            await query.edit_message_text("📤 Dispatching media files safely to your Telegram screen...")
             
             with open(final_output, 'rb') as local_file:
-                if is_audio:
-                    await update.message.reply_audio(audio=local_file, title=title, caption="Audio extracted successfully!")
+                if "dl_audio" in action:
+                    await query.message.reply_audio(audio=local_file, title=title, caption=f"🎵 Converted at {quality}kbps")
                 else:
-                    await update.message.reply_video(video=local_file, caption=f"🎥 {title}")
+                    await query.message.reply_video(video=local_file, caption=f"🎥 Resolution: {height}p")
             
             os.remove(final_output)
-            await status_message.delete()
+            await query.message.delete()
         else:
-            await status_message.edit_text("❌ System error: Downloaded asset could not be located.")
+            await query.edit_message_text("❌ Download was successful, but processing failed to save locally.")
 
     except Exception as e:
         logging.error(e)
-        await status_message.edit_text("❌ Failed to process. The video might be too long, private, or over the 50MB limit.")
+        await query.edit_message_text("❌ Bypassing failed. The video might be completely blocked by YouTube or over the 45MB ceiling.")
         for item in os.listdir('.'):
             if file_id in item:
                 try: os.remove(item)
                 except: pass
 
-async def mp3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("❌ Usage: `/mp3 <paste your youtube link here>`")
-        return
-    url_arg = context.args[0]
-    await download_media(update, context, is_audio=True, url=url_arg)
-
-async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await download_media(update, context, is_audio=False)
-
 if __name__ == '__main__':
-    # 2. BOTFATHER TOKEN GOES DIRECTLY HERE
+    # 2. VERIFY YOUR SECRET BOT TOKEN IS PLACED HERE Correctly
     BOT_TOKEN = "8836848217:AAE_Ht4bzJ2ymkg0E6ChsZvnI__fMOjfNOI"
 
-    # Direct standard connection (Zero docker layers needed)
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('admin', admin_panel))
-    application.add_handler(CommandHandler('mp3', mp3_command))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), video_handler))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_link))
+    application.add_handler(CallbackQueryHandler(handle_menu_selection, pattern="^menu_"))
+    application.add_handler(CallbackQueryHandler(process_download, pattern="^dl_"))
     
     application.run_polling()
